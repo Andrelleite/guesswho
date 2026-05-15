@@ -767,7 +767,28 @@ class ResponseAnalyzer:
         status_counts = Counter(r.status_code for r in valid_responses)
         lengths = [r.content_length for r in valid_responses]
         times = [r.response_time for r in valid_responses]
-        
+
+        # Timing outlier flags (z-score > 2.5) for histogram colouring
+        timing_outliers: Set[str] = set()
+        if len(times) >= 3:
+            try:
+                mean_t = statistics.mean(times)
+                stdev_t = statistics.stdev(times)
+                if stdev_t > 0:
+                    timing_outliers = {
+                        r.username for r in valid_responses
+                        if abs((r.response_time - mean_t) / stdev_t) > 2.5
+                    }
+            except statistics.StatisticsError:
+                pass
+
+        # Content-length distribution (cap at 20 unique lengths to keep graph readable)
+        length_counter = Counter(lengths)
+        if len(length_counter) <= 20:
+            length_distribution = dict(sorted(length_counter.items()))
+        else:
+            length_distribution = {}
+
         return {
             "total": len(self.responses),
             "successful": len(valid_responses),
@@ -778,4 +799,10 @@ class ResponseAnalyzer:
             "max_response_time": max(times) if times else 0,
             "avg_content_length": statistics.mean(lengths) if lengths else 0,
             "unique_lengths": len(set(lengths)) if lengths else 0,
+            "length_distribution": length_distribution,
+            # List of (response_time, is_outlier) for the timing histogram
+            "timing_data": [
+                (r.response_time, r.username in timing_outliers)
+                for r in valid_responses
+            ],
         }

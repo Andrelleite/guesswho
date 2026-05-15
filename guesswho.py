@@ -73,18 +73,63 @@ def parse_headers(headers_list: list) -> dict:
     return headers
 
 
-def print_results(results: dict):
-    """Print fuzzing results in a formatted way"""
+def _bar(value: int, total: int, width: int = 30) -> str:
+    """Return a filled bar proportional to value/total."""
+    filled = int(round(width * value / total)) if total else 0
+    return "█" * filled + "░" * (width - filled)
+
+
+def _status_color(code: int) -> str:
+    if code == 0:
+        return Fore.RED
+    if code < 300:
+        return Fore.GREEN
+    if code < 400:
+        return Fore.CYAN
+    if code < 500:
+        return Fore.YELLOW
+    return Fore.RED
+
+
+def _timing_histogram(responses_data: list, width: int = 40, bins: int = 10) -> str:
+    """Build an ASCII timing histogram from a list of (time, is_outlier) tuples."""
+    if not responses_data:
+        return ""
+    times = [t for t, _ in responses_data]
+    lo, hi = min(times), max(times)
+    if hi == lo:
+        return ""
+    step = (hi - lo) / bins
+    buckets = [0] * bins
+    outlier_buckets = [False] * bins
+    for t, is_outlier in responses_data:
+        idx = min(int((t - lo) / step), bins - 1)
+        buckets[idx] += 1
+        if is_outlier:
+            outlier_buckets[idx] = True
+    max_count = max(buckets) or 1
+    lines = []
+    for i in range(bins):
+        label = f"{lo + i * step:.3f}s"
+        bar_len = int(round(width * buckets[i] / max_count))
+        color = Fore.RED if outlier_buckets[i] else Fore.CYAN
+        bar = color + "█" * bar_len + Style.RESET_ALL + "░" * (width - bar_len)
+        lines.append(f"  {label:>9} │{bar}│ {buckets[i]}")
+    return "\n".join(lines)
+
+
+def print_results(results: dict, fuzzer=None):
+    """Print fuzzing results and a visual statistics graph."""
     findings = results["results"]
     stats = results["statistics"]
-    
-    print(f"\n{Fore.CYAN}{'='*70}{Style.RESET_ALL}")
+
+    # ── RESULTS ──────────────────────────────────────────────────────────
+    print(f"\n{Fore.CYAN}{'═'*70}{Style.RESET_ALL}")
     print(f"{Fore.YELLOW}[+] ENUMERATION RESULTS{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}\n")
-    
+    print(f"{Fore.CYAN}{'═'*70}{Style.RESET_ALL}\n")
+
     if findings:
         print(f"{Fore.GREEN}[+] Found {len(findings)} potential valid username(s):{Style.RESET_ALL}\n")
-        
         for username, confidence, reason in findings:
             color = Fore.GREEN if confidence >= 0.8 else Fore.YELLOW
             print(f"{color}[!] {username}{Style.RESET_ALL}")
@@ -98,25 +143,72 @@ def print_results(results: dict):
         print(f"    - None of the tested usernames are valid")
         print(f"    - The detection threshold is too high (try lowering --min-confidence)")
         print()
-        
-    print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}")
+
+    # ── STATISTICS ───────────────────────────────────────────────────────
+    print(f"{Fore.CYAN}{'═'*70}{Style.RESET_ALL}")
     print(f"{Fore.YELLOW}[+] STATISTICS{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}\n")
-    
-    print(f"Total requests:        {stats.get('total', 0)}")
-    print(f"Successful responses:  {stats.get('successful', 0)}")
-    print(f"Failed requests:       {stats.get('failed', 0)}")
-    print(f"Avg response time:     {stats.get('avg_response_time', 0):.3f}s")
-    print(f"Min response time:     {stats.get('min_response_time', 0):.3f}s")
-    print(f"Max response time:     {stats.get('max_response_time', 0):.3f}s")
-    print(f"Avg content length:    {stats.get('avg_content_length', 0):.0f} bytes")
-    print(f"Unique content lengths: {stats.get('unique_lengths', 0)}")
-    
-    if 'status_codes' in stats:
-        print(f"\nStatus code distribution:")
-        for code, count in sorted(stats['status_codes'].items()):
-            print(f"  {code}: {count}")
-    
+    print(f"{Fore.CYAN}{'═'*70}{Style.RESET_ALL}\n")
+
+    total     = stats.get('total', 0)
+    success   = stats.get('successful', 0)
+    failed    = stats.get('failed', 0)
+    avg_time  = stats.get('avg_response_time', 0)
+    min_time  = stats.get('min_response_time', 0)
+    max_time  = stats.get('max_response_time', 0)
+    avg_len   = stats.get('avg_content_length', 0)
+    uniq_len  = stats.get('unique_lengths', 0)
+
+    print(f"  Total requests      : {total}")
+    print(f"  Successful          : {success}")
+    print(f"  Failed              : {failed}")
+    print(f"  Avg response time   : {avg_time:.3f}s  (min {min_time:.3f}s / max {max_time:.3f}s)")
+    print(f"  Avg content length  : {avg_len:.0f} bytes  ({uniq_len} unique lengths)\n")
+
+    # ── GRAPH 1: Status code distribution ────────────────────────────────
+    status_codes = stats.get('status_codes', {})
+    if status_codes:
+        print(f"  {Fore.YELLOW}┌─ Status Code Distribution {'─'*38}┐{Style.RESET_ALL}")
+        bar_total = max(status_codes.values()) or 1
+        for code in sorted(status_codes):
+            count = status_codes[code]
+            color = _status_color(code)
+            bar = _bar(count, bar_total, width=32)
+            pct = count / total * 100 if total else 0
+            print(f"  {Fore.YELLOW}│{Style.RESET_ALL}  {color}{code}{Style.RESET_ALL}  {color}{bar}{Style.RESET_ALL}  {count:>6} ({pct:5.1f}%)")
+        print(f"  {Fore.YELLOW}└{'─'*67}┘{Style.RESET_ALL}\n")
+
+    # ── GRAPH 2: Content length distribution ─────────────────────────────
+    len_dist = stats.get('length_distribution', {})
+    if len_dist and len(len_dist) > 1:
+        print(f"  {Fore.YELLOW}┌─ Content Length Distribution {'─'*35}┐{Style.RESET_ALL}")
+        bar_total = max(len_dist.values()) or 1
+        for length in sorted(len_dist):
+            count = len_dist[length]
+            bar = _bar(count, bar_total, width=32)
+            pct = count / success * 100 if success else 0
+            print(f"  {Fore.YELLOW}│{Style.RESET_ALL}  {Fore.CYAN}{length:>5}B{Style.RESET_ALL}  {Fore.CYAN}{bar}{Style.RESET_ALL}  {count:>6} ({pct:5.1f}%)")
+        print(f"  {Fore.YELLOW}└{'─'*67}┘{Style.RESET_ALL}\n")
+
+    # ── GRAPH 3: Response time histogram ─────────────────────────────────
+    timing_data = stats.get('timing_data', [])
+    if timing_data and len(timing_data) >= 5:
+        print(f"  {Fore.YELLOW}┌─ Response Time Distribution {'─'*36}┐{Style.RESET_ALL}")
+        hist = _timing_histogram(timing_data, width=38, bins=10)
+        if hist:
+            for line in hist.splitlines():
+                print(f"  {Fore.YELLOW}│{Style.RESET_ALL}{line}")
+        print(f"  {Fore.YELLOW}│{Style.RESET_ALL}  {Fore.RED}Red = timing outlier (potential valid user){Style.RESET_ALL}")
+        print(f"  {Fore.YELLOW}└{'─'*67}┘{Style.RESET_ALL}\n")
+
+    # ── GRAPH 4: Confidence scores of findings ────────────────────────────
+    if findings:
+        print(f"  {Fore.YELLOW}┌─ Detected User Confidence Scores {'─'*31}┐{Style.RESET_ALL}")
+        for username, confidence, _ in findings:
+            color = Fore.GREEN if confidence >= 0.8 else Fore.YELLOW
+            bar = _bar(int(confidence * 100), 100, width=32)
+            print(f"  {Fore.YELLOW}│{Style.RESET_ALL}  {color}{username:<20}{Style.RESET_ALL}  {color}{bar}{Style.RESET_ALL}  {confidence:.0%}")
+        print(f"  {Fore.YELLOW}└{'─'*67}┘{Style.RESET_ALL}\n")
+
     print()
 
 
