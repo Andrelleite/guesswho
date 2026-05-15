@@ -245,9 +245,8 @@ class ResponseAnalyzer:
         outliers = set()
         for response in self.responses:
             if response.status_code > 0 and response.status_code != most_common_status:
-                # Don't flag 5xx as valid-user signals unless most responses are also 5xx
-                if response.status_code >= 500 and server_errors > total * 0.3:
-                    continue  # Just noise from server overload
+                if response.status_code >= 500:
+                    continue  # 5xx = server error, never a valid-user signal
                 outliers.add(response.username)
                 if self.verbose:
                     print(f"      → {response.username}: status {response.status_code} (differs from baseline {most_common_status})")
@@ -296,8 +295,13 @@ class ResponseAnalyzer:
         return outliers
         
     def _analyze_content_length(self) -> Set[str]:
-        """Find usernames with different content lengths"""
-        length_counts = Counter(r.content_length for r in self.responses if r.status_code > 0)
+        """Find usernames with different content lengths (5xx excluded)"""
+        # Exclude 5xx server errors — they have different body sizes due to crash messages, not user data
+        reliable = [r for r in self.responses if r.status_code > 0 and r.status_code < 500]
+        if not reliable:
+            reliable = [r for r in self.responses if r.status_code > 0]
+
+        length_counts = Counter(r.content_length for r in reliable)
         
         if not length_counts:
             if self.verbose:
@@ -312,15 +316,13 @@ class ResponseAnalyzer:
             print(f"      Detection threshold: >5% or >50 bytes difference")
         
         outliers = set()
-        for response in self.responses:
-            if response.status_code > 0:
-                length_diff = abs(response.content_length - most_common_length)
-                threshold = max(most_common_length * 0.05, 50)
-                # If difference is more than 5% or more than 50 bytes
-                if length_diff > threshold:
-                    outliers.add(response.username)
-                    if self.verbose:
-                        print(f"      → {response.username}: {response.content_length} bytes (diff: {length_diff}, threshold: {threshold:.0f})")
+        for response in reliable:
+            length_diff = abs(response.content_length - most_common_length)
+            threshold = max(most_common_length * 0.05, 50)
+            if length_diff > threshold:
+                outliers.add(response.username)
+                if self.verbose:
+                    print(f"      → {response.username}: {response.content_length} bytes (diff: {length_diff}, threshold: {threshold:.0f})")
                     
         return outliers
         
@@ -508,8 +510,9 @@ class ResponseAnalyzer:
         header_patterns = defaultdict(lambda: defaultdict(int))
         
         # Count occurrences of each header value for each header name
+        # Exclude 5xx responses — their headers reflect server crash state, not user validity
         for response in self.responses:
-            if response.status_code > 0:
+            if response.status_code > 0 and response.status_code < 500:
                 for header_name, header_value in response.headers.items():
                     # Skip noisy headers that change per request
                     if header_name not in IGNORED_HEADERS:
@@ -521,11 +524,10 @@ class ResponseAnalyzer:
         for header_name, value_counts in header_patterns.items():
             if len(value_counts) > 1:
                 most_common_value = max(value_counts, key=value_counts.get)
-                most_common_count = value_counts[most_common_value]
                 
-                # Find responses with different header values
+                # Find responses with different header values (only non-5xx)
                 for response in self.responses:
-                    if response.status_code > 0:
+                    if response.status_code > 0 and response.status_code < 500:
                         header_value = response.headers.get(header_name)
                         if header_value and header_value != most_common_value:
                             outliers.append((response.username, f"{header_name}: {header_value[:50]}"))
@@ -593,8 +595,12 @@ class ResponseAnalyzer:
         if len(self.responses) < 3:
             return set()
         
-        valid_responses = [r for r in self.responses if r.status_code > 0]
+        # Only use reliable (non-5xx) responses for similarity clustering
+        # 5xx responses have different bodies due to crash messages — not user validity signals
+        valid_responses = [r for r in self.responses if r.status_code > 0 and r.status_code < 500]
         if len(valid_responses) < 3:
+            if self.verbose:
+                print("      Skipped: Need at least 3 reliable (non-5xx) responses")
             return set()
         
         if self.verbose:
@@ -657,9 +663,9 @@ class ResponseAnalyzer:
         structures = defaultdict(int)
         json_responses = {}
 
-        # Try to parse JSON responses
+        # Try to parse JSON responses (5xx excluded — crash messages skew structure)
         for response in self.responses:
-            if response.status_code > 0:
+            if response.status_code > 0 and response.status_code < 500:
                 try:
                     data = json.loads(response.body)
                     structure = self._get_json_structure(data)
