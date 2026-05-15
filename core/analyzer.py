@@ -230,23 +230,23 @@ class ResponseAnalyzer:
                 print(f"      [!] Server may be overloaded — try reducing concurrency (-c 5 or -c 1)")
                 print(f"      [!] Retries attempted automatically, but some may still be 5xx")
 
-        # Use only reliable (non-5xx) responses to determine baseline
-        reliable = [r for r in self.responses if r.status_code > 0 and r.status_code < 500]
+        # Use only reliable responses (non-5xx, non-format-error 400s) for baseline
+        reliable = [r for r in self.responses if self._reliable(r)]
         if not reliable:
-            # All responses were 5xx — fall back to full set
+            # All responses were noise — fall back to full set
             reliable = [r for r in self.responses if r.status_code > 0]
 
         reliable_counts = Counter(r.status_code for r in reliable)
         most_common_status = reliable_counts.most_common(1)[0][0] if reliable_counts else 0
 
         if self.verbose:
-            print(f"      Reliable status baseline: {most_common_status} ({reliable_counts.get(most_common_status, 0)} occurrences, 5xx excluded)")
+            print(f"      Reliable status baseline: {most_common_status} ({reliable_counts.get(most_common_status, 0)} occurrences, noise excluded)")
 
         outliers = set()
         for response in self.responses:
-            if response.status_code > 0 and response.status_code != most_common_status:
-                if response.status_code >= 500:
-                    continue  # 5xx = server error, never a valid-user signal
+            if not self._reliable(response):
+                continue  # noise (5xx or format-error 400) — never a valid-user signal
+            if response.status_code != most_common_status:
                 outliers.add(response.username)
                 if self.verbose:
                     print(f"      → {response.username}: status {response.status_code} (differs from baseline {most_common_status})")
@@ -255,7 +255,7 @@ class ResponseAnalyzer:
         
     def _analyze_timing(self) -> Set[str]:
         """Find usernames with unusual response times"""
-        valid_times = [r.response_time for r in self.responses if r.status_code > 0]
+        valid_times = [r.response_time for r in self.responses if self._reliable(r)]
         
         if len(valid_times) < 3:
             if self.verbose:
@@ -285,7 +285,7 @@ class ResponseAnalyzer:
         threshold = 2.5  # Z-score threshold
         
         for response in self.responses:
-            if response.status_code > 0:
+            if self._reliable(response):
                 z_score = abs((response.response_time - mean_time) / stdev_time)
                 if z_score > threshold:
                     outliers.add(response.username)
@@ -296,8 +296,8 @@ class ResponseAnalyzer:
         
     def _analyze_content_length(self) -> Set[str]:
         """Find usernames with different content lengths (5xx excluded)"""
-        # Exclude 5xx server errors — they have different body sizes due to crash messages, not user data
-        reliable = [r for r in self.responses if r.status_code > 0 and r.status_code < 500]
+        # Exclude noise (5xx and format-error 400s) — their body sizes are not user-validity signals
+        reliable = [r for r in self.responses if self._reliable(r)]
         if not reliable:
             reliable = [r for r in self.responses if r.status_code > 0]
 
@@ -353,7 +353,7 @@ class ResponseAnalyzer:
             print(f"      Parsed {len(json_data)}/{len(self.responses)} responses as JSON")
 
         # Exclude 5xx responses from JSON comparison baseline — they're server crashes, not user signals
-        reliable_usernames = {r.username for r in self.responses if 0 < r.status_code < 500}
+        reliable_usernames = {r.username for r in self.responses if self._reliable(r)}
         json_data_reliable = {u: d for u, d in json_data.items() if u in reliable_usernames}
 
         # Use reliable responses as the comparison base; fall back to all if nothing reliable
@@ -512,7 +512,7 @@ class ResponseAnalyzer:
         # Count occurrences of each header value for each header name
         # Exclude 5xx responses — their headers reflect server crash state, not user validity
         for response in self.responses:
-            if response.status_code > 0 and response.status_code < 500:
+            if self._reliable(response):
                 for header_name, header_value in response.headers.items():
                     # Skip noisy headers that change per request
                     if header_name not in IGNORED_HEADERS:
@@ -527,7 +527,7 @@ class ResponseAnalyzer:
                 
                 # Find responses with different header values (only non-5xx)
                 for response in self.responses:
-                    if response.status_code > 0 and response.status_code < 500:
+                    if self._reliable(response):
                         header_value = response.headers.get(header_name)
                         if header_value and header_value != most_common_value:
                             outliers.append((response.username, f"{header_name}: {header_value[:50]}"))
@@ -597,10 +597,10 @@ class ResponseAnalyzer:
         
         # Only use reliable (non-5xx) responses for similarity clustering
         # 5xx responses have different bodies due to crash messages — not user validity signals
-        valid_responses = [r for r in self.responses if r.status_code > 0 and r.status_code < 500]
+        valid_responses = [r for r in self.responses if self._reliable(r)]
         if len(valid_responses) < 3:
             if self.verbose:
-                print("      Skipped: Need at least 3 reliable (non-5xx) responses")
+                print("      Skipped: Need at least 3 reliable responses")
             return set()
         
         if self.verbose:
@@ -665,7 +665,7 @@ class ResponseAnalyzer:
 
         # Try to parse JSON responses (5xx excluded — crash messages skew structure)
         for response in self.responses:
-            if response.status_code > 0 and response.status_code < 500:
+            if self._reliable(response):
                 try:
                     data = json.loads(response.body)
                     structure = self._get_json_structure(data)
@@ -710,7 +710,7 @@ class ResponseAnalyzer:
     
     def _analyze_timing_histogram(self) -> Set[str]:
         """Advanced timing analysis using percentiles"""
-        valid_times = [(r.username, r.response_time) for r in self.responses if r.status_code > 0]
+        valid_times = [(r.username, r.response_time) for r in self.responses if self._reliable(r)]
         
         if len(valid_times) < 10:
             return set()
@@ -753,7 +753,46 @@ class ResponseAnalyzer:
                             print(f"      → {response.username}: Rate limit header: {header_name}")
         
         return indicators
-        
+
+    def _is_format_error_400(self, response) -> bool:
+        """Return True when a 400 response signals a format/validation failure
+        (e.g. syntactically invalid email address such as 'anne marie@host') rather
+        than user-existence information.  Treated as noise — excluded from all
+        analysis the same way 5xx server errors are excluded."""
+        if response.status_code != 400:
+            return False
+        try:
+            body = json.loads(response.body)
+            msg = ''
+            for field in ('message', 'error', 'msg', 'detail', 'description'):
+                val = body.get(field)
+                if val:
+                    msg = str(val).lower()
+                    break
+            if 'invalid' in msg and ('email' in msg or 'format' in msg or 'address' in msg):
+                return True
+            if any(kw in msg for kw in ('validation', 'malformed', 'bad request')):
+                return True
+        except (json.JSONDecodeError, ValueError, AttributeError):
+            body_lower = response.body.lower()
+            if 'invalid' in body_lower and 'email' in body_lower:
+                return True
+        return False
+
+    def _reliable(self, response) -> bool:
+        """Return True if this response is a reliable user-validity signal.
+
+        Excludes:
+          - status 0        : request failed entirely (network error / timeout)
+          - 5xx             : server crash / overload — not user-specific
+          - 400 format error: syntactically invalid input (e.g. email with a
+                              space or apostrophe) rejected before the server
+                              even looks up the user
+        """
+        if response.status_code <= 0 or response.status_code >= 500:
+            return False
+        return not self._is_format_error_400(response)
+
     def get_statistics(self) -> Dict:
         """Get statistics about the responses"""
         if not self.responses:
