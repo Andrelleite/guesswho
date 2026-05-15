@@ -1,0 +1,31 @@
+# GuessWho Example Configurations
+
+# Example 1: Basic Login Test
+# python guesswho.py -u "http://example.com/login" -w wordlists/usernames.txt -d "username=FUZZ&password=test123"
+
+# Example 2: JSON API Endpoint
+# python guesswho.py -u "http://api.example.com/auth/login" -w wordlists/emails.txt -d '{"email":"FUZZ","password":"test"}' -H "Content-Type: application/json"
+
+# Example 3: Password Reset
+# python guesswho.py -u "http://example.com/reset-password" -w wordlists/emails.txt -d "email=FUZZ"
+
+# Example 4: REST API with URL placeholder
+# python guesswho.py -u "http://api.example.com/users/FUZZ" -w wordlists/usernames.txt -X GET --placeholder FUZZ
+
+# Example 5: Registration Endpoint
+# python guesswho.py -u "http://example.com/register" -w wordlists/usernames.txt -d "username=FUZZ&email=test@test.com&password=Pass123!"
+
+# Example 6: High Performance Test
+# python guesswho.py -u "http://example.com/check-user" -w wordlists/usernames.txt -d "user=FUZZ" -c 100 -t 5
+
+# Example 7: With Custom Headers and Authentication
+# python guesswho.py -u "http://example.com/api/check" -w wordlists/usernames.txt -d '{"username":"FUZZ"}' -H "Content-Type: application/json" -H "Authorization: Bearer TOKEN" -H "X-API-Key: KEY"
+
+# Example 8: Verbose Mode with Output File
+# python guesswho.py -u "http://example.com/login" -w wordlists/usernames.txt -d "user=FUZZ&pass=test" -v -o results.txt
+
+# Example 9: Lower Confidence Threshold for More Results
+# python guesswho.py -u "http://example.com/forgot" -w wordlists/emails.txt -d "email=FUZZ" --min-confidence 0.4
+
+# Example 10: Custom Cookie
+# python guesswho.py -u "http://example.com/check" -w wordlists/usernames.txt -d "username=FUZZ" --cookie "session=abc123;csrf=xyz789"
