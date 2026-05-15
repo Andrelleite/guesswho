@@ -20,25 +20,28 @@ init(autoreset=True)
 
 def print_banner():
     """Print tool banner"""
-    banner = f"""
-{Fore.CYAN}╔═══════════════════════════════════════════════════════════════════════╗
-║                                                                       ║
-║   {Fore.RED}   ██████╗ {Fore.YELLOW}██╗   ██╗{Fore.GREEN}███████╗{Fore.CYAN}███████╗{Fore.MAGENTA}███████╗{Fore.RED}██╗    ██╗{Fore.YELLOW}██╗  ██╗{Fore.GREEN} ██████╗  {Fore.CYAN}║
-║   {Fore.RED}  ██╔════╝ {Fore.YELLOW}██║   ██║{Fore.GREEN}██╔════╝{Fore.CYAN}██╔════╝{Fore.MAGENTA}██╔════╝{Fore.RED}██║    ██║{Fore.YELLOW}██║  ██║{Fore.GREEN}██╔═══██╗ {Fore.CYAN}║
-║   {Fore.RED}  ██║  ███╗{Fore.YELLOW}██║   ██║{Fore.GREEN}█████╗  {Fore.CYAN}███████╗{Fore.MAGENTA}███████╗{Fore.RED}██║ █╗ ██║{Fore.YELLOW}███████║{Fore.GREEN}██║   ██║ {Fore.CYAN}║
-║   {Fore.RED}  ██║   ██║{Fore.YELLOW}██║   ██║{Fore.GREEN}██╔══╝  {Fore.CYAN}╚════██║{Fore.MAGENTA}╚════██║{Fore.RED}██║███╗██║{Fore.YELLOW}██╔══██║{Fore.GREEN}██║   ██║ {Fore.CYAN}║
-║   {Fore.RED}  ╚██████╔╝{Fore.YELLOW}╚██████╔╝{Fore.GREEN}███████╗{Fore.CYAN}███████║{Fore.MAGENTA}███████║{Fore.RED}╚███╔███╔╝{Fore.YELLOW}██║  ██║{Fore.GREEN}╚██████╔╝ {Fore.CYAN}║
-║   {Fore.RED}   ╚═════╝ {Fore.YELLOW} ╚═════╝ {Fore.GREEN}╚══════╝{Fore.CYAN}╚══════╝{Fore.MAGENTA}╚══════╝{Fore.RED} ╚══╝╚══╝ {Fore.YELLOW}╚═╝  ╚═╝{Fore.GREEN} ╚═════╝  {Fore.CYAN}║
-║                                                                       ║
-║              {Fore.YELLOW}⚡ Next-Gen User Enumeration Framework ⚡{Fore.CYAN}               ║
-║                                                                       ║
-║   {Fore.GREEN}[+]{Fore.WHITE} Async Engine    {Fore.CYAN}│{Fore.GREEN} [+]{Fore.WHITE} 11 Detection Methods {Fore.CYAN}│{Fore.GREEN} [+]{Fore.WHITE} Smart Analysis {Fore.CYAN}  ║
-║   {Fore.GREEN}[+]{Fore.WHITE} WAF Evasion     {Fore.CYAN}│{Fore.GREEN} [+]{Fore.WHITE} Proxy Rotation      {Fore.CYAN}│{Fore.GREEN} [+]{Fore.WHITE} 1000+ req/s    {Fore.CYAN}  ║
-║                                                                       ║
-║   {Fore.MAGENTA}Version: 1.1.0{Fore.CYAN}  │  {Fore.YELLOW}Phase: 1.2 Complete{Fore.CYAN}  │  {Fore.RED}github.com/Andrelleite{Fore.CYAN}  ║
-║                                                                       ║
-╚═══════════════════════════════════════════════════════════════════════╝{Style.RESET_ALL}
-    """
+    # Dim white for structural chrome, bright white for text
+    DIM  = Style.DIM  + Fore.WHITE
+    W    = Style.BRIGHT + Fore.WHITE
+    C    = Style.BRIGHT + Fore.CYAN
+    G    = Style.BRIGHT + Fore.GREEN
+    R    = Style.RESET_ALL
+
+    banner = (
+        f"\n"
+        f"{DIM}  ──────────────────────────────────────────────────{R}\n"
+        f"  {W}  ░██████╗░██╗   ██╗███████╗███████╗███████╗██╗    ██╗██╗  ██╗ ██████╗{R}\n"
+        f"  {C}  ██╔════╝ ██║   ██║██╔════╝██╔════╝██╔════╝██║    ██║██║  ██║██╔═══██╗{R}\n"
+        f"  {W}  ██║  ███╗██║   ██║█████╗  ███████╗███████╗██║ █╗ ██║███████║██║   ██║{R}\n"
+        f"  {C}  ██║   ██║██║   ██║██╔══╝  ╚════██║╚════██║██║███╗██║██╔══██║██║   ██║{R}\n"
+        f"  {W}  ╚██████╔╝╚██████╔╝███████╗███████║███████║╚███╔███╔╝██║  ██║╚██████╔╝{R}\n"
+        f"  {C}   ╚═════╝  ╚═════╝ ╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝╚═╝  ╚═╝ ╚═════╝{R}\n"
+        f"{DIM}  ──────────────────────────────────────────────────{R}\n"
+        f"  {DIM}user enumeration framework{R}  "
+        f"{G}async{R} · {G}11 techniques{R} · {G}timing templates{R}  "
+        f"{DIM}v1.1.0{R}\n"
+        f"{DIM}  ──────────────────────────────────────────────────{R}\n"
+    )
     print(banner)
 
 
