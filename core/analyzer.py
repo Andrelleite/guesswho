@@ -300,34 +300,159 @@ class ResponseAnalyzer:
         return outliers
         
     def _analyze_body_patterns(self) -> List[Tuple[str, str]]:
-        """Find specific patterns in response bodies that indicate valid users"""
-        patterns = [
-            ("user exists", "User exists message"),
-            ("account found", "Account found message"),
-            ("email sent", "Email sent confirmation"),
-            ("password reset", "Password reset message"),
-            ("check your email", "Email check prompt"),
-            ("verification link", "Verification message"),
-            ("already registered", "Already registered message"),
-            ("username taken", "Username taken message"),
-            ("email already", "Email already used"),
-        ]
-        
-        if self.verbose:
-            print(f"      Searching for {len(patterns)} patterns in response bodies")
-        
-        matches = []
-        
+        """Deep analysis of response bodies.
+
+        For JSON APIs: flattens every response to dot-notation paths and
+        compares field presence, values, types and array lengths across all
+        responses so even a single differing boolean or extra nested key is
+        caught.
+
+        For plain-text APIs: broad keyword matching covering success,
+        existence, and error messages.
+        """
+
+        matches: List[Tuple[str, str]] = []
+
+        # ── 1. Parse every JSON response ──────────────────────────────────
+        json_data: Dict[str, any] = {}
         for response in self.responses:
             if response.status_code > 0:
+                try:
+                    json_data[response.username] = json.loads(response.body)
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+        if self.verbose:
+            print(f"      Parsed {len(json_data)}/{len(self.responses)} responses as JSON")
+
+        # ── 2. Flatten JSON to dot-notation {path: value} ─────────────────
+        def _flatten(obj, prefix: str = '') -> Dict[str, any]:
+            out: Dict[str, any] = {}
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    path = f"{prefix}.{k}" if prefix else k
+                    out.update(_flatten(v, path))
+            elif isinstance(obj, list):
+                # Record array length as a comparable scalar
+                out[prefix + '.__len__'] = len(obj)
+                for i, item in enumerate(obj[:5]):   # inspect first 5 elements
+                    out.update(_flatten(item, f"{prefix}[{i}]"))
+            else:
+                out[prefix] = obj
+            return out
+
+        flat: Dict[str, Dict[str, any]] = {
+            u: _flatten(d) for u, d in json_data.items()
+        }
+
+        if flat:
+            # ── 3. Union of all paths seen across responses ────────────────
+            all_paths: Set[str] = set()
+            for f in flat.values():
+                all_paths.update(f.keys())
+
+            if self.verbose:
+                print(f"      Found {len(all_paths)} unique JSON paths across all responses")
+
+            for path in sorted(all_paths):
+                values_by_user = {u: f.get(path) for u, f in flat.items()}
+
+                present   = {u: v for u, v in values_by_user.items() if v is not None}
+                absent    = {u for u, v in values_by_user.items() if v is None}
+
+                # ── 3a. Field presence differs across responses ────────────
+                if absent and present:
+                    minority_threshold = len(flat) / 2
+                    if len(present) < minority_threshold:
+                        # Only a few users have this field — they are the outliers
+                        for u in present:
+                            reason = f"JSON '{path}' only present for this user (value: {str(present[u])[:40]!r})"
+                            matches.append((u, reason))
+                            if self.verbose:
+                                print(f"      → {u}: {reason}")
+                    elif len(absent) < minority_threshold:
+                        # Only a few users are MISSING this field — they are the outliers
+                        for u in absent:
+                            reason = f"JSON '{path}' missing (present for all others)"
+                            matches.append((u, reason))
+                            if self.verbose:
+                                print(f"      → {u}: {reason}")
+
+                # ── 3b. Field value differs from the majority ──────────────
+                if len(present) >= 2:
+                    value_counts: Counter = Counter(str(v) for v in present.values())
+                    if len(value_counts) > 1:
+                        majority_str = value_counts.most_common(1)[0][0]
+                        for u, v in present.items():
+                            if str(v) != majority_str:
+                                reason = f"JSON '{path}': {str(v)[:50]!r} (majority: {majority_str[:50]!r})"
+                                matches.append((u, reason))
+                                if self.verbose:
+                                    print(f"      → {u}: {reason}")
+
+                # ── 3c. Field type differs ────────────────────────────────
+                if len(present) >= 2:
+                    type_counts: Counter = Counter(type(v).__name__ for v in present.values())
+                    if len(type_counts) > 1:
+                        majority_type = type_counts.most_common(1)[0][0]
+                        for u, v in present.items():
+                            if type(v).__name__ != majority_type:
+                                reason = f"JSON '{path}' type {type(v).__name__!r} (majority: {majority_type!r})"
+                                matches.append((u, reason))
+                                if self.verbose:
+                                    print(f"      → {u}: {reason}")
+
+        # ── 4. Plain-text patterns (non-JSON or fallback) ──────────────────
+        text_patterns = [
+            # Success / confirmation indicators
+            ("password reset",       "Password reset mentioned"),
+            ("check your email",     "Check email prompt"),
+            ("email sent",           "Email sent confirmation"),
+            ("verification link",    "Verification link sent"),
+            ("reset link",           "Reset link sent"),
+            ("link has been sent",   "Link sent confirmation"),
+            ("email has been sent",  "Email sent confirmation"),
+            # Account-existence indicators
+            ("user exists",          "User exists"),
+            ("account found",        "Account found"),
+            ("already registered",   "Already registered"),
+            ("already exists",       "Already exists"),
+            ("username taken",       "Username taken"),
+            ("email already",        "Email already in use"),
+            ("account already",      "Account already exists"),
+            # Error messages that imply the account IS real
+            ("invalid credentials",  "Invalid credentials (user exists)"),
+            ("wrong password",       "Wrong password (user exists)"),
+            ("incorrect password",   "Incorrect password (user exists)"),
+            ("account locked",       "Account locked (user exists)"),
+            ("account disabled",     "Account disabled (user exists)"),
+            ("account suspended",    "Account suspended (user exists)"),
+            ("too many attempts",    "Brute-force protection (user exists)"),
+            ("rate limit",           "Rate limit hit (user may exist)"),
+        ]
+
+        for response in self.responses:
+            if response.status_code > 0 and response.username not in json_data:
                 body_lower = response.body.lower()
-                for pattern, description in patterns:
+                for pattern, description in text_patterns:
                     if pattern in body_lower:
                         matches.append((response.username, description))
                         if self.verbose:
                             print(f"      → {response.username}: Found '{pattern}' → {description}")
-                        
-        return matches
+
+        # ── 5. Deduplicate ────────────────────────────────────────────────
+        seen: Set[tuple] = set()
+        deduped: List[Tuple[str, str]] = []
+        for item in matches:
+            key = (item[0], item[1])
+            if key not in seen:
+                seen.add(key)
+                deduped.append(item)
+
+        if self.verbose:
+            print(f"      Total unique signals: {len(deduped)}")
+
+        return deduped
     
     def _analyze_headers(self) -> List[Tuple[str, str]]:
         """Analyze HTTP headers for differences"""
@@ -336,6 +461,8 @@ class ResponseAnalyzer:
             'Date', 'date',
             'Set-Cookie', 'set-cookie',
             'Age', 'age',
+            'ETag', 'Etag', 'etag',       # Content hash - unique per response body
+            'Last-Modified', 'last-modified',
             'X-Request-ID', 'x-request-id',
             'X-Trace-Id', 'x-trace-id',
             'Request-Id', 'request-id',
@@ -494,46 +621,52 @@ class ResponseAnalyzer:
         return outliers
     
     def _analyze_json_structure(self) -> List[Tuple[str, str]]:
-        """Analyze JSON/XML structure differences"""
+        """Analyze JSON/XML structure differences (deep recursive comparison)"""
         structures = defaultdict(int)
         json_responses = {}
-        
+
         # Try to parse JSON responses
         for response in self.responses:
             if response.status_code > 0:
                 try:
                     data = json.loads(response.body)
-                    # Get structure signature (keys and types)
                     structure = self._get_json_structure(data)
                     structures[structure] += 1
                     json_responses[response.username] = structure
                 except (json.JSONDecodeError, ValueError):
                     pass  # Not JSON
-        
+
         if len(structures) <= 1:
             return []
-        
+
         most_common = max(structures, key=structures.get)
-        
+
         outliers = []
         for username, structure in json_responses.items():
             if structure != most_common:
-                reason = f"Different JSON structure"
-                outliers.append((username, reason))
+                outliers.append((username, "Different JSON structure"))
                 if self.verbose:
-                    print(f"      → {username}: {reason}")
-        
+                    print(f"      → {username}: Different JSON structure")
+                    print(f"         Structure: {structure}")
+                    print(f"         Baseline:  {most_common}")
+
         return outliers
-    
-    def _get_json_structure(self, obj, prefix="") -> str:
-        """Get a signature of JSON structure"""
+
+    def _get_json_structure(self, obj, depth: int = 0) -> str:
+        """Recursively build a signature of JSON structure (keys + types at every level)"""
+        if depth > 5:  # Prevent runaway recursion
+            return "..."
         if isinstance(obj, dict):
-            keys = sorted(obj.keys())
-            return f"dict:{','.join(keys)}"
+            parts = []
+            for key in sorted(obj.keys()):
+                child_sig = self._get_json_structure(obj[key], depth + 1)
+                parts.append(f"{key}:{child_sig}")
+            return "{" + ",".join(parts) + "}"
         elif isinstance(obj, list):
-            if obj:
-                return f"list[{self._get_json_structure(obj[0])}]"
-            return "list[]"
+            if not obj:
+                return "[]"
+            child_sig = self._get_json_structure(obj[0], depth + 1)
+            return f"[{child_sig}]"
         else:
             return type(obj).__name__
     
