@@ -212,21 +212,46 @@ class ResponseAnalyzer:
         return results
         
     def _analyze_status_codes(self) -> Set[str]:
-        """Find usernames with different status codes"""
+        """Find usernames with different status codes.
+        5xx responses (server errors) are treated as unreliable noise and excluded
+        from the baseline calculation — only 2xx/3xx/4xx are used.
+        """
         status_counts = Counter(r.status_code for r in self.responses)
-        most_common_status = status_counts.most_common(1)[0][0]
-        
+
         if self.verbose:
             print(f"      Status code distribution: {dict(status_counts)}")
-            print(f"      Most common status: {most_common_status} ({status_counts[most_common_status]} occurrences)")
-        
+
+        # Warn if server is overwhelmed (lots of 5xx)
+        total = len(self.responses)
+        server_errors = sum(1 for r in self.responses if 500 <= r.status_code < 600)
+        if server_errors > total * 0.3:
+            if self.verbose:
+                print(f"      [!] WARNING: {server_errors}/{total} responses are 5xx server errors")
+                print(f"      [!] Server may be overloaded — try reducing concurrency (-c 5 or -c 1)")
+                print(f"      [!] Retries attempted automatically, but some may still be 5xx")
+
+        # Use only reliable (non-5xx) responses to determine baseline
+        reliable = [r for r in self.responses if r.status_code > 0 and r.status_code < 500]
+        if not reliable:
+            # All responses were 5xx — fall back to full set
+            reliable = [r for r in self.responses if r.status_code > 0]
+
+        reliable_counts = Counter(r.status_code for r in reliable)
+        most_common_status = reliable_counts.most_common(1)[0][0] if reliable_counts else 0
+
+        if self.verbose:
+            print(f"      Reliable status baseline: {most_common_status} ({reliable_counts.get(most_common_status, 0)} occurrences, 5xx excluded)")
+
         outliers = set()
         for response in self.responses:
-            if response.status_code != most_common_status and response.status_code > 0:
+            if response.status_code > 0 and response.status_code != most_common_status:
+                # Don't flag 5xx as valid-user signals unless most responses are also 5xx
+                if response.status_code >= 500 and server_errors > total * 0.3:
+                    continue  # Just noise from server overload
                 outliers.add(response.username)
                 if self.verbose:
-                    print(f"      → {response.username}: status {response.status_code} (differs from {most_common_status})")
-                
+                    print(f"      → {response.username}: status {response.status_code} (differs from baseline {most_common_status})")
+
         return outliers
         
     def _analyze_timing(self) -> Set[str]:
@@ -325,6 +350,13 @@ class ResponseAnalyzer:
         if self.verbose:
             print(f"      Parsed {len(json_data)}/{len(self.responses)} responses as JSON")
 
+        # Exclude 5xx responses from JSON comparison baseline — they're server crashes, not user signals
+        reliable_usernames = {r.username for r in self.responses if 0 < r.status_code < 500}
+        json_data_reliable = {u: d for u, d in json_data.items() if u in reliable_usernames}
+
+        # Use reliable responses as the comparison base; fall back to all if nothing reliable
+        json_data_for_compare = json_data_reliable if json_data_reliable else json_data
+
         # ── 2. Flatten JSON to dot-notation {path: value} ─────────────────
         def _flatten(obj, prefix: str = '') -> Dict[str, any]:
             out: Dict[str, any] = {}
@@ -342,7 +374,7 @@ class ResponseAnalyzer:
             return out
 
         flat: Dict[str, Dict[str, any]] = {
-            u: _flatten(d) for u, d in json_data.items()
+            u: _flatten(d) for u, d in json_data_for_compare.items()
         }
 
         if flat:

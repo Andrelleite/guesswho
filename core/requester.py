@@ -194,10 +194,29 @@ class AsyncRequester:
                             redirect_count += 1
                             continue
                     
+                    # Retry on 5xx server errors (e.g. SQLite concurrency crashes)
+                    if status >= 500:
+                        max_retries = 3
+                        retry_delay = 0.3
+                        for attempt in range(max_retries):
+                            await asyncio.sleep(retry_delay * (attempt + 1))
+                            try:
+                                async with self.session.request(**request_kwargs) as retry_resp:
+                                    retry_status = retry_resp.status
+                                    retry_body = await retry_resp.text()
+                                    if retry_status < 500:
+                                        status = retry_status
+                                        body = retry_body
+                                        response_headers = dict(retry_resp.headers)
+                                        response_cookies = {c.key: c.value for c in retry_resp.cookies.values()}
+                                        break
+                            except Exception:
+                                pass  # Keep original response if retry fails
+
                     # No redirect, final response
                     final_url = current_url
                     response_time = time.time() - start_time
-                    
+
                     return Response(
                         username=username,
                         status_code=status,
