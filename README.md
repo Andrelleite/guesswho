@@ -1,26 +1,39 @@
 # GuessWho 🔍
 
-**Fast User Enumeration Fuzzing Tool**
+**Fast User Enumeration Fuzzing Tool with Advanced Evasion**
 
 GuessWho is a high-performance security testing tool designed to detect user enumeration vulnerabilities in web applications. It's faster than Burp Intruder and combines the best features of tools like ffuf, gobuster, and Burp Suite for specialized user enumeration testing.
 
+**✨ NEW in v1.1.0**: Advanced evasion techniques including User-Agent rotation, proxy support, header randomization, and timing jitter!
+
 ## 🎯 Features
 
+### Core Features
 - **⚡ Lightning Fast**: Asynchronous HTTP requests with configurable concurrency (up to 100+ concurrent requests)
-- **🧠 Intelligent Analysis**: Multiple detection techniques:
-  - Status code analysis
-  - Response timing analysis
-  - Content length comparison
-  - Pattern matching in response bodies
-  - Confidence scoring system
-- **🎨 Beautiful Output**: Color-coded results with progress bars
-- **🔧 Flexible Configuration**: 
-  - Support for any HTTP method (GET, POST, PUT, etc.)
-  - Custom headers and cookies
-  - JSON or form data
-  - Custom placeholder strings
+- **🧠 Intelligent Analysis**: 11 detection techniques:
+  - Status code analysis (80% confidence)
+  - Response timing analysis with z-score (60% confidence)
+  - Content length comparison (70% confidence)
+  - Pattern matching in response bodies (90% confidence)
+  - HTTP header analysis (75% confidence)
+  - Redirect chain tracking (85% confidence)
+  - Cookie analysis (70% confidence)
+  - Response similarity with Levenshtein distance (75% confidence)
+  - JSON/XML structure analysis (80% confidence)
+  - Advanced timing histogram analysis (65% confidence)
+  - Rate limiting detection (60% confidence)
+- **🎨 Beautiful Output**: Color-coded results with progress bars and confidence scores
 - **📊 Detailed Statistics**: Response time metrics, status code distribution, and more
 - **💾 Export Results**: Save findings to text files
+
+### 🥷 Advanced Evasion (v1.1.0 - Phase 1.2)
+- **User-Agent Rotation**: 30+ real browser signatures to avoid fingerprinting
+- **Proxy Support**: HTTP/SOCKS4/SOCKS5 proxy chains with rotation or random selection
+- **Header Randomization**: Intelligent HTTP header variation to defeat pattern detection
+- **Timing Jitter**: Configurable random delays to avoid rate-based detection
+- **Multiple Techniques**: Combine evasion methods for maximum stealth
+
+[📖 Read the complete Evasion Guide →](EVASION.md)
 
 ## 🚀 Quick Start
 
@@ -121,6 +134,39 @@ python guesswho.py -u "http://target.com/admin/check-user" \
                    --cookie "session=abc123"
 ```
 
+### 🥷 With Evasion Techniques (NEW in v1.1.0)
+
+```bash
+# User-Agent rotation
+python guesswho.py -u "http://target.com/login" \
+                   -w wordlists/usernames.txt \
+                   -d "user=FUZZ&pass=test" \
+                   --user-agent-rotation
+
+# Combined evasion (stealth mode)
+python guesswho.py -u "http://target.com/api/check" \
+                   -w wordlists/users.txt \
+                   -d '{"username":"FUZZ"}' \
+                   -H "Content-Type: application/json" \
+                   --user-agent-rotation \
+                   --random-headers \
+                   --proxy-file proxies.txt \
+                   --proxy-rotation \
+                   --jitter 0.5-1.5 \
+                   -c 10
+
+# WAF bypass example
+python guesswho.py -u "https://protected-site.com/login" \
+                   -w users.txt \
+                   -d "username=FUZZ&password=test" \
+                   --user-agent-rotation \
+                   --random-headers \
+                   --jitter 0.3-0.8 \
+                   -c 20
+```
+
+**[📖 Complete Evasion Guide and Best Practices →](EVASION.md)**
+
 ## 🎛️ Command Line Options
 
 ### Required Arguments
@@ -135,6 +181,16 @@ python guesswho.py -u "http://target.com/admin/check-user" \
 - `-H, --header`: Custom headers (can be used multiple times)
 - `--cookie`: Cookie data
 - `--placeholder`: Custom placeholder string (default: FUZZ)
+
+### Evasion Options (NEW in v1.1.0)
+
+- `--user-agent-rotation`: Enable User-Agent rotation (30+ signatures)
+- `--user-agents-file FILE`: Custom User-Agent list file
+- `--random-headers`: Randomize HTTP headers to avoid fingerprinting
+- `--proxy URL`: Use proxy (http://host:port or socks5://host:port)
+- `--proxy-file FILE`: File with proxy list (one per line)
+- `--proxy-rotation`: Rotate through proxies instead of random selection
+- `--jitter MIN-MAX`: Random delay between requests (e.g., "0.1-0.5" seconds)
 
 ### Performance Tuning
 

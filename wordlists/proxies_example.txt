@@ -1,0 +1,13 @@
+# Example Proxy List for GuessWho
+# Format: protocol://host:port
+# Supported: http, https, socks4, socks5
+
+# HTTP Proxies
+http://proxy1.example.com:8080
+http://proxy2.example.com:3128
+
+# SOCKS5 Proxies
+socks5://proxy3.example.com:1080
+socks5://127.0.0.1:9050
+
+# Add your own proxies below (one per line)

@@ -8,6 +8,7 @@ import asyncio
 import time
 from typing import Dict, Optional, Tuple, List
 from dataclasses import dataclass, field
+from .evasion import EvasionManager
 
 
 @dataclass
@@ -27,18 +28,20 @@ class Response:
 class AsyncRequester:
     """Handles asynchronous HTTP requests"""
     
-    def __init__(self, timeout: int = 10, max_concurrent: int = 50):
+    def __init__(self, timeout: int = 10, max_concurrent: int = 50, evasion_manager: Optional[EvasionManager] = None):
         """
         Initialize the requester
         
         Args:
             timeout: Request timeout in seconds
             max_concurrent: Maximum concurrent requests
+            evasion_manager: Optional evasion manager for advanced techniques
         """
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self.max_concurrent = max_concurrent
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.session: Optional[aiohttp.ClientSession] = None
+        self.evasion_manager = evasion_manager
         
     async def __aenter__(self):
         """Async context manager entry"""
@@ -79,122 +82,147 @@ class AsyncRequester:
         Returns:
             Response object with timing and content
         """
-        async with self.semaphore:
-            # Replace placeholder in URL
-            target_url = url.replace(placeholder, username)
+        # Apply timing jitter for evasion
+        if self.evasion_manager:
+            await self.evasion_manager.apply_jitter()
             
-            # Replace placeholder in data
-            request_data = None
-            if data:
-                request_data = {}
-                for key, value in data.items():
-                    if isinstance(value, str):
-                        request_data[key] = value.replace(placeholder, username)
-                    else:
-                        request_data[key] = value
+        # Replace placeholder in URL
+        target_url = url.replace(placeholder, username)
+            
+        # Replace placeholder in data
+        request_data = None
+        if data:
+            request_data = {}
+            for key, value in data.items():
+                if isinstance(value, str):
+                    request_data[key] = value.replace(placeholder, username)
+                else:
+                    request_data[key] = value
                         
-            # Replace placeholder in headers
-            request_headers = {}
-            if headers:
-                for key, value in headers.items():
-                    if isinstance(value, str):
-                        request_headers[key] = value.replace(placeholder, username)
-                    else:
-                        request_headers[key] = value
+        # Prepare headers with evasion
+        request_headers = {}
+        if headers:
+            for key, value in headers.items():
+                if isinstance(value, str):
+                    request_headers[key] = value.replace(placeholder, username)
+                else:
+                    request_headers[key] = value
             
-            start_time = time.time()
-            redirect_chain = []
-            final_url = target_url
+        # Apply evasion techniques
+        if self.evasion_manager:
+            # Add/override User-Agent
+            ua = self.evasion_manager.get_user_agent()
+            if ua:
+                request_headers["User-Agent"] = ua
             
-            try:
-                # Follow redirects manually to capture chain
-                current_url = target_url
-                max_redirects = 10
-                redirect_count = 0
+            # Apply header randomization
+            request_headers = self.evasion_manager.get_headers(request_headers)
+        
+        # Get proxy if configured
+        proxy = None
+        if self.evasion_manager:
+            proxy = self.evasion_manager.get_proxy()
+            
+        start_time = time.time()
+        redirect_chain = []
+        final_url = target_url
+        
+        try:
+            # Follow redirects manually to capture chain
+            current_url = target_url
+            max_redirects = 10
+            redirect_count = 0
+            
+            while redirect_count < max_redirects:
+                # Build request kwargs
+                request_kwargs = {
+                    "method": method,
+                    "url": current_url,
+                    "data": request_data if redirect_count == 0 else None,
+                    "headers": request_headers,
+                    "cookies": cookies,
+                    "allow_redirects": False,
+                    "ssl": False  # Allow self-signed certificates
+                }
                 
-                while redirect_count < max_redirects:
-                    async with self.session.request(
-                        method=method,
-                        url=current_url,
-                        data=request_data if redirect_count == 0 else None,
-                        headers=request_headers,
-                        cookies=cookies,
-                        allow_redirects=False,
-                        ssl=False  # Allow self-signed certificates
-                    ) as response:
-                        status = response.status
-                        body = await response.text()
-                        response_headers = dict(response.headers)
-                        response_cookies = {c.key: c.value for c in response.cookies.values()}
-                        
-                        # Check if redirect
-                        if status in (301, 302, 303, 307, 308):
-                            location = response_headers.get('Location', '')
-                            if location:
-                                redirect_chain.append((status, current_url))
-                                # Handle relative URLs
-                                if location.startswith('/'):
-                                    from urllib.parse import urlparse, urljoin
-                                    current_url = urljoin(current_url, location)
-                                else:
-                                    current_url = location
-                                redirect_count += 1
-                                continue
-                        
-                        # No redirect, final response
-                        final_url = current_url
-                        response_time = time.time() - start_time
-                        
-                        return Response(
-                            username=username,
-                            status_code=status,
-                            response_time=response_time,
-                            content_length=len(body),
-                            body=body,
-                            headers=response_headers,
-                            cookies=response_cookies,
-                            redirect_chain=redirect_chain,
-                            final_url=final_url
-                        )
+                # Add proxy if configured
+                if proxy:
+                    request_kwargs["proxy"] = proxy
                 
-                # Too many redirects
-                response_time = time.time() - start_time
-                return Response(
-                    username=username,
-                    status_code=310,  # Custom: too many redirects
-                    response_time=response_time,
-                    content_length=0,
-                    body="Too many redirects",
-                    headers={},
-                    cookies={},
-                    redirect_chain=redirect_chain,
-                    final_url=current_url
-                )
+                async with self.session.request(**request_kwargs) as response:
+                    status = response.status
+                    body = await response.text()
+                    response_headers = dict(response.headers)
+                    response_cookies = {c.key: c.value for c in response.cookies.values()}
                     
-            except asyncio.TimeoutError:
-                response_time = time.time() - start_time
-                return Response(
-                    username=username,
-                    status_code=0,
-                    response_time=response_time,
-                    content_length=0,
-                    body="",
-                    headers={},
-                    cookies={},
-                    redirect_chain=[],
-                    final_url=target_url
-                )
+                    # Check if redirect
+                    if status in (301, 302, 303, 307, 308):
+                        location = response_headers.get('Location', '')
+                        if location:
+                            redirect_chain.append((status, current_url))
+                            # Handle relative URLs
+                            if location.startswith('/'):
+                                from urllib.parse import urlparse, urljoin
+                                current_url = urljoin(current_url, location)
+                            else:
+                                current_url = location
+                            redirect_count += 1
+                            continue
+                    
+                    # No redirect, final response
+                    final_url = current_url
+                    response_time = time.time() - start_time
+                    
+                    return Response(
+                        username=username,
+                        status_code=status,
+                        response_time=response_time,
+                        content_length=len(body),
+                        body=body,
+                        headers=response_headers,
+                        cookies=response_cookies,
+                        redirect_chain=redirect_chain,
+                        final_url=final_url
+                    )
+            
+            # Too many redirects
+            response_time = time.time() - start_time
+            return Response(
+                username=username,
+                status_code=310,  # Custom: too many redirects
+                response_time=response_time,
+                content_length=0,
+                body="Too many redirects",
+                headers={},
+                cookies={},
+                redirect_chain=redirect_chain,
+                final_url=current_url
+            )
                 
-            except Exception as e:
-                response_time = time.time() - start_time
-                return Response(
-                    username=username,
-                    status_code=-1,
-                    response_time=response_time,
-                    content_length=0,
-                    body=str(e),
-                    headers={},
-                    cookies={},
-                    redirect_chain=[],
-                    final_url=target_url
-                )
+        except asyncio.TimeoutError:
+            response_time = time.time() - start_time
+            return Response(
+                username=username,
+                status_code=0,
+                response_time=response_time,
+                content_length=0,
+                body="",
+                headers={},
+                cookies={},
+                redirect_chain=[],
+                final_url=target_url
+            )
+            
+        except Exception as e:
+            response_time = time.time() - start_time
+            return Response(
+                username=username,
+                status_code=-1,
+                response_time=response_time,
+                content_length=0,
+                body=str(e),
+                headers={},
+                cookies={},
+                redirect_chain=[],
+                final_url=target_url
+            )

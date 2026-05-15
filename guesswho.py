@@ -12,6 +12,7 @@ from pathlib import Path
 from colorama import init, Fore, Style
 
 from core.fuzzer import UserEnumFuzzer
+from core.evasion import EvasionConfig, EvasionManager, ProxyManager
 
 # Initialize colorama for cross-platform colored output
 init(autoreset=True)
@@ -195,6 +196,23 @@ Examples:
     parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
     parser.add_argument('--no-banner', action='store_true', help='Disable banner')
     
+    # Evasion options (Phase 1.2: Advanced Evasion Techniques)
+    evasion_group = parser.add_argument_group('evasion options', 'Advanced techniques to avoid detection')
+    evasion_group.add_argument('--user-agent-rotation', action='store_true',
+                             help='Enable User-Agent rotation (30+ signatures)')
+    evasion_group.add_argument('--user-agents-file', metavar='FILE',
+                             help='Custom User-Agent list file (one per line)')
+    evasion_group.add_argument('--random-headers', action='store_true',
+                             help='Randomize HTTP headers (Accept-Language, encoding, etc.)')
+    evasion_group.add_argument('--proxy', metavar='URL',
+                             help='Use proxy (http://host:port or socks5://host:port)')
+    evasion_group.add_argument('--proxy-file', metavar='FILE',
+                             help='File with proxy list (one per line)')
+    evasion_group.add_argument('--proxy-rotation', action='store_true',
+                             help='Rotate through proxies instead of random selection')
+    evasion_group.add_argument('--jitter', metavar='MIN-MAX',
+                             help='Random delay between requests, e.g., "0.1-0.5" seconds')
+    
     args = parser.parse_args()
     
     # Print banner
@@ -211,6 +229,53 @@ Examples:
         print(f"{Fore.RED}[!] Error: Placeholder '{args.placeholder}' not found in URL or data{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}[*] Make sure to include '{args.placeholder}' in either the URL or data{Style.RESET_ALL}")
         sys.exit(1)
+    
+    # Setup evasion if any evasion options are enabled
+    evasion_manager = None
+    if any([args.user_agent_rotation, args.random_headers, args.proxy, args.proxy_file, args.jitter]):
+        try:
+            # Parse jitter
+            jitter_min, jitter_max = 0.0, 0.0
+            if args.jitter:
+                try:
+                    parts = args.jitter.split('-')
+                    if len(parts) == 2:
+                        jitter_min = float(parts[0])
+                        jitter_max = float(parts[1])
+                    else:
+                        print(f"{Fore.RED}[!] Invalid jitter format. Use: MIN-MAX (e.g., 0.1-0.5){Style.RESET_ALL}")
+                        sys.exit(1)
+                except ValueError:
+                    print(f"{Fore.RED}[!] Jitter values must be numbers{Style.RESET_ALL}")
+                    sys.exit(1)
+            
+            # Load proxies
+            proxy_list = []
+            if args.proxy_file:
+                proxy_list = ProxyManager.load_from_file(args.proxy_file)
+                if not proxy_list:
+                    print(f"{Fore.YELLOW}[!] Warning: No proxies loaded from file{Style.RESET_ALL}")
+            elif args.proxy:
+                proxy_list = [args.proxy]
+            
+            # Create evasion config
+            evasion_config = EvasionConfig(
+                user_agent_rotation=args.user_agent_rotation,
+                user_agents_file=args.user_agents_file,
+                random_headers=args.random_headers,
+                proxy_enabled=bool(proxy_list),
+                proxy_list=proxy_list if proxy_list else None,
+                proxy_rotation=args.proxy_rotation,
+                jitter_min=jitter_min,
+                jitter_max=jitter_max
+            )
+            
+            evasion_manager = EvasionManager(evasion_config)
+            print(f"{Fore.CYAN}[*] Evasion techniques enabled{Style.RESET_ALL}")
+            
+        except Exception as e:
+            print(f"{Fore.RED}[!] Error setting up evasion: {e}{Style.RESET_ALL}")
+            sys.exit(1)
         
     try:
         # Create fuzzer instance

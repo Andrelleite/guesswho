@@ -9,6 +9,7 @@ from pathlib import Path
 from tqdm import tqdm
 from .requester import AsyncRequester, Response
 from .analyzer import ResponseAnalyzer
+from .evasion import EvasionManager
 
 
 class UserEnumFuzzer:
@@ -26,7 +27,8 @@ class UserEnumFuzzer:
         timeout: int = 10,
         concurrency: int = 50,
         min_confidence: float = 0.6,
-        verbose: bool = False
+        verbose: bool = False,
+        evasion_manager: Optional[EvasionManager] = None
     ):
         """
         Initialize the fuzzer
@@ -43,6 +45,7 @@ class UserEnumFuzzer:
             concurrency: Number of concurrent requests
             min_confidence: Minimum confidence threshold for reporting
             verbose: Enable verbose output
+            evasion_manager: Optional evasion manager for advanced techniques
         """
         self.url = url
         self.wordlist = wordlist
@@ -55,6 +58,7 @@ class UserEnumFuzzer:
         self.concurrency = concurrency
         self.min_confidence = min_confidence
         self.verbose = verbose
+        self.evasion_manager = evasion_manager
         
         self.analyzer = ResponseAnalyzer(verbose=verbose)
         
@@ -92,7 +96,20 @@ class UserEnumFuzzer:
         # Create progress bar
         pbar = tqdm(total=len(usernames), desc="Fuzzing", unit="req")
         
-        async with AsyncRequester(timeout=self.timeout, max_concurrent=self.concurrency) as requester:
+        # Print evasion stats if enabled
+        if self.evasion_manager:
+            stats = self.evasion_manager.get_stats()
+            if stats['user_agent_rotation']:
+                print(f"[*] User-Agent Rotation: {stats['ua_count']} signatures")
+            if stats['proxy_enabled']:
+                print(f"[*] Proxy: {stats['proxy_count']} proxies ({'rotating' if stats['proxy_rotation'] else 'random'})")
+            if stats['header_randomization']:
+                print(f"[*] Header Randomization: Enabled")
+            if stats['jitter_range'] != 'disabled':
+                print(f"[*] Timing Jitter: {stats['jitter_range']}")
+            print()
+        
+        async with AsyncRequester(timeout=self.timeout, max_concurrent=self.concurrency, evasion_manager=self.evasion_manager) as requester:
             # Create tasks for all requests
             tasks = []
             for username in usernames:
