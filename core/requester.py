@@ -28,17 +28,20 @@ class Response:
 class AsyncRequester:
     """Handles asynchronous HTTP requests"""
     
-    def __init__(self, timeout: int = 10, max_concurrent: int = 50, evasion_manager: Optional[EvasionManager] = None):
+    def __init__(self, timeout: int = 15, max_concurrent: int = 10, delay: float = 0.0, evasion_manager: Optional[EvasionManager] = None):
         """
         Initialize the requester
-        
+
         Args:
             timeout: Request timeout in seconds
             max_concurrent: Maximum concurrent requests
+            delay: Seconds to sleep inside the semaphore after each request
+                   (rate-limits to max_concurrent/delay req/s at most)
             evasion_manager: Optional evasion manager for advanced techniques
         """
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self.max_concurrent = max_concurrent
+        self.delay = delay
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.session: Optional[aiohttp.ClientSession] = None
         self.evasion_manager = evasion_manager
@@ -82,10 +85,33 @@ class AsyncRequester:
         Returns:
             Response object with timing and content
         """
+        async with self.semaphore:
+            result = await self._make_request_inner(
+                url=url, username=username, method=method,
+                data=data, headers=headers, cookies=cookies,
+                placeholder=placeholder
+            )
+            # Rate-limit: hold the semaphore slot for `delay` seconds so the
+            # overall throughput stays at most max_concurrent/delay req/s.
+            if self.delay > 0:
+                await asyncio.sleep(self.delay)
+            return result
+
+    async def _make_request_inner(
+        self,
+        url: str,
+        username: str,
+        method: str = "POST",
+        data: Optional[Dict] = None,
+        headers: Optional[Dict] = None,
+        cookies: Optional[Dict] = None,
+        placeholder: str = "FUZZ"
+    ) -> Response:
+        """Inner implementation — runs inside the concurrency semaphore."""
         # Apply timing jitter for evasion
         if self.evasion_manager:
             await self.evasion_manager.apply_jitter()
-            
+
         # Replace placeholder in URL
         target_url = url.replace(placeholder, username)
             

@@ -280,8 +280,22 @@ Examples:
     parser.add_argument('--placeholder', default='FUZZ', help='Placeholder to replace with username (default: FUZZ)')
     
     # Performance tuning
-    parser.add_argument('-c', '--concurrency', type=int, default=50, help='Number of concurrent requests (default: 50)')
-    parser.add_argument('-t', '--timeout', type=int, default=10, help='Request timeout in seconds (default: 10)')
+    parser.add_argument(
+        '-T', '--timing', type=int, choices=[1, 2, 3, 4, 5], default=3,
+        metavar='LEVEL',
+        help=(
+            'Timing template 1-5 (default: 3). '
+            'T1=Sneaky(1c/2s), T2=Polite(3c/0.5s), '
+            'T3=Normal(10c/15s), T4=Aggressive(25c/8s), T5=Insane(50c/5s). '
+            'Overridden by -c/-t/--delay if set explicitly.'
+        )
+    )
+    parser.add_argument('-c', '--concurrency', type=int, default=None,
+                        help='Override concurrent requests (overrides -T)')
+    parser.add_argument('-t', '--timeout', type=int, default=None,
+                        help='Override request timeout in seconds (overrides -T)')
+    parser.add_argument('--delay', type=float, default=None,
+                        help='Override per-request delay in seconds (overrides -T)')
     
     # Analysis configuration
     parser.add_argument('--min-confidence', type=float, default=0.6, 
@@ -310,10 +324,34 @@ Examples:
                              help='Random delay between requests, e.g., "0.1-0.5" seconds')
     
     args = parser.parse_args()
+
+    # ── Timing templates ───────────────────────────────────────────────────
+    # Each entry: (concurrency, timeout_secs, delay_secs, label)
+    TIMING_TEMPLATES = {
+        1: (1,  30, 2.0,  "Sneaky    — 1 concurrent, 2s delay,   30s timeout"),
+        2: (3,  20, 0.5,  "Polite    — 3 concurrent, 0.5s delay, 20s timeout"),
+        3: (10, 15, 0.0,  "Normal    — 10 concurrent, no delay,  15s timeout"),
+        4: (25,  8, 0.0,  "Aggressive— 25 concurrent, no delay,   8s timeout"),
+        5: (50,  5, 0.0,  "Insane    — 50 concurrent, no delay,   5s timeout"),
+    }
+    t_concurrency, t_timeout, t_delay, t_label = TIMING_TEMPLATES[args.timing]
+    # Explicit -c / -t / --delay override the template
+    concurrency = args.concurrency if args.concurrency is not None else t_concurrency
+    timeout     = args.timeout     if args.timeout     is not None else t_timeout
+    delay       = args.delay       if args.delay       is not None else t_delay
     
     # Print banner
     if not args.no_banner:
         print_banner()
+
+    # Show timing config
+    _, _, _, t_label = TIMING_TEMPLATES[args.timing]
+    overrides = []
+    if args.concurrency is not None: overrides.append(f"-c {concurrency}")
+    if args.timeout     is not None: overrides.append(f"-t {timeout}")
+    if args.delay       is not None: overrides.append(f"--delay {delay}")
+    override_note = f"  (overrides: {', '.join(overrides)})" if overrides else ""
+    print(f"{Fore.CYAN}[*] Timing: T{args.timing} — {t_label}{override_note}{Style.RESET_ALL}")
         
     # Parse data and headers
     data = parse_data(args.data)
@@ -383,8 +421,9 @@ Examples:
             headers=headers,
             cookies=cookies,
             placeholder=args.placeholder,
-            timeout=args.timeout,
-            concurrency=args.concurrency,
+            timeout=timeout,
+            concurrency=concurrency,
+            delay=delay,
             min_confidence=args.min_confidence,
             verbose=args.verbose
         )

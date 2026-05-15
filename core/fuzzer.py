@@ -24,8 +24,9 @@ class UserEnumFuzzer:
         headers: Optional[Dict] = None,
         cookies: Optional[Dict] = None,
         placeholder: str = "FUZZ",
-        timeout: int = 10,
-        concurrency: int = 50,
+        timeout: int = 15,
+        concurrency: int = 10,
+        delay: float = 0.0,
         min_confidence: float = 0.6,
         verbose: bool = False,
         evasion_manager: Optional[EvasionManager] = None
@@ -43,6 +44,7 @@ class UserEnumFuzzer:
             placeholder: Placeholder string to replace with usernames
             timeout: Request timeout in seconds
             concurrency: Number of concurrent requests
+            delay: Seconds to sleep inside semaphore after each request (rate limiting)
             min_confidence: Minimum confidence threshold for reporting
             verbose: Enable verbose output
             evasion_manager: Optional evasion manager for advanced techniques
@@ -56,6 +58,7 @@ class UserEnumFuzzer:
         self.placeholder = placeholder
         self.timeout = timeout
         self.concurrency = concurrency
+        self.delay = delay
         self.min_confidence = min_confidence
         self.verbose = verbose
         self.evasion_manager = evasion_manager
@@ -109,7 +112,7 @@ class UserEnumFuzzer:
                 print(f"[*] Timing Jitter: {stats['jitter_range']}")
             print()
         
-        async with AsyncRequester(timeout=self.timeout, max_concurrent=self.concurrency, evasion_manager=self.evasion_manager) as requester:
+        async with AsyncRequester(timeout=self.timeout, max_concurrent=self.concurrency, delay=self.delay, evasion_manager=self.evasion_manager) as requester:
             # Create tasks for all requests
             tasks = []
             for username in usernames:
