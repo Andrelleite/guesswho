@@ -331,13 +331,30 @@ class ResponseAnalyzer:
     
     def _analyze_headers(self) -> List[Tuple[str, str]]:
         """Analyze HTTP headers for differences"""
+        # Headers to ignore (vary per request, not per user validity)
+        IGNORED_HEADERS = {
+            'Date', 'date',
+            'Set-Cookie', 'set-cookie',
+            'Age', 'age',
+            'X-Request-ID', 'x-request-id',
+            'X-Trace-Id', 'x-trace-id',
+            'Request-Id', 'request-id',
+            'CF-Ray',  # Cloudflare
+            'X-Amzn-RequestId',  # AWS
+            'X-Amzn-Trace-Id',
+            'X-B3-TraceId',  # Zipkin
+            'X-B3-SpanId',
+        }
+        
         header_patterns = defaultdict(lambda: defaultdict(int))
         
         # Count occurrences of each header value for each header name
         for response in self.responses:
             if response.status_code > 0:
                 for header_name, header_value in response.headers.items():
-                    header_patterns[header_name][header_value] += 1
+                    # Skip noisy headers that change per request
+                    if header_name not in IGNORED_HEADERS:
+                        header_patterns[header_name][header_value] += 1
         
         outliers = []
         
