@@ -134,16 +134,35 @@ class AsyncRequester:
             redirect_count = 0
             
             while redirect_count < max_redirects:
+                # Detect if we should send as JSON or form data
+                is_json = False
+                if request_headers:
+                    content_type = request_headers.get('Content-Type', '').lower()
+                    is_json = 'application/json' in content_type
+                
+                # Also detect JSON by structure (nested dicts)
+                if not is_json and request_data:
+                    for value in request_data.values():
+                        if isinstance(value, dict):
+                            is_json = True
+                            break
+                
                 # Build request kwargs
                 request_kwargs = {
                     "method": method,
                     "url": current_url,
-                    "data": request_data if redirect_count == 0 else None,
                     "headers": request_headers,
                     "cookies": cookies,
                     "allow_redirects": False,
                     "ssl": False  # Allow self-signed certificates
                 }
+                
+                # Add body data - use json= for JSON, data= for form data
+                if redirect_count == 0 and request_data:
+                    if is_json:
+                        request_kwargs["json"] = request_data
+                    else:
+                        request_kwargs["data"] = request_data
                 
                 # Add proxy if configured
                 if proxy:
