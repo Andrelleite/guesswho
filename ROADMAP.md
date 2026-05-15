@@ -33,15 +33,30 @@ Transform GuessWho into the most advanced, intelligent, and comprehensive user e
 **Dependencies:** None  
 **Estimate:** 2-3 weeks
 
-### 1.2 Advanced Evasion Techniques 🥷
+### 1.2 Advanced Evasion Techniques 🥷 ✅ COMPLETED
 **Priority: CRITICAL | Difficulty: MEDIUM**
-- [ ] User-Agent rotation (1000+ real browser signatures)
-- [ ] Proxy chain support (HTTP/SOCKS4/SOCKS5)
-- [ ] Random timing/jitter between requests
-- [ ] Header randomization and fingerprint evasion
+**Status:** ✅ Released in v1.1.0 (May 15, 2026)
+**Documentation:** [EVASION.md](EVASION.md)
+
+Completed Features:
+- [x] User-Agent rotation (30+ real browser signatures) ✅
+- [x] Proxy chain support (HTTP/SOCKS4/SOCKS5) ✅
+- [x] Random timing/jitter between requests ✅
+- [x] Header randomization and fingerprint evasion ✅
+
+Future Enhancements (v1.2.0):
 - [ ] HTTP/2 and HTTP/3 support
 - [ ] TLS fingerprint randomization
 - [ ] IPv6 support
+- [ ] Expand User-Agent database to 1000+ signatures
+
+**Implementation:**
+- `core/evasion.py`: Complete evasion framework (280+ lines)
+- 7 new CLI options: `--user-agent-rotation`, `--user-agents-file`, `--random-headers`, `--proxy`, `--proxy-file`, `--proxy-rotation`, `--jitter`
+- Integrated into requester and fuzzer modules
+- Zero performance overhead when disabled
+- Composable evasion techniques (combine multiple methods)
+
 **Dependencies:** None  
 **Estimate:** 2 weeks
 
