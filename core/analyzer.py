@@ -438,37 +438,58 @@ class ResponseAnalyzer:
         if len(valid_responses) < 3:
             return set()
         
-        # Calculate similarity matrix
-        similarities = []
-        for i, resp1 in enumerate(valid_responses):
-            for j, resp2 in enumerate(valid_responses):
-                if i < j:
-                    # Use Levenshtein ratio (0-1, higher = more similar)
-                    ratio = Levenshtein.ratio(resp1.body, resp2.body)
-                    similarities.append(ratio)
+        if self.verbose:
+            print(f"      Analyzing response similarity for {len(valid_responses)} responses")
         
-        if not similarities:
+        # Use DBSCAN clustering to group similar responses
+        from sklearn.cluster import DBSCAN
+        import numpy as np
+        
+        # Build similarity matrix
+        n = len(valid_responses)
+        distance_matrix = np.zeros((n, n))
+        
+        for i in range(n):
+            for j in range(i + 1, n):
+                # Levenshtein ratio: 1.0 = identical, 0.0 = completely different
+                ratio = Levenshtein.ratio(valid_responses[i].body, valid_responses[j].body)
+                # Convert to distance: 0.0 = identical, 1.0 = completely different
+                distance = 1.0 - ratio
+                distance_matrix[i][j] = distance
+                distance_matrix[j][i] = distance
+        
+        # Cluster responses by similarity (eps=0.15 means 85% similarity threshold)
+        clustering = DBSCAN(eps=0.15, min_samples=2, metric='precomputed').fit(distance_matrix)
+        labels = clustering.labels_
+        
+        if self.verbose:
+            unique_labels = set(labels)
+            print(f"      Found {len(unique_labels)} clusters: {dict(zip(*np.unique(labels, return_counts=True)))}")
+        
+        # Find the largest cluster (baseline/invalid user responses)
+        label_counts = {}
+        for label in labels:
+            if label != -1:  # -1 means noise/outlier in DBSCAN
+                label_counts[label] = label_counts.get(label, 0) + 1
+        
+        if not label_counts:
+            # All responses are outliers? Fallback to old logic
             return set()
         
-        # Find responses that are significantly different from the majority
-        mean_similarity = statistics.mean(similarities)
-        threshold = 0.85  # 85% similarity threshold
+        largest_cluster = max(label_counts, key=label_counts.get)
+        largest_cluster_size = label_counts[largest_cluster]
         
+        if self.verbose:
+            print(f"      Largest cluster: {largest_cluster} with {largest_cluster_size} responses (baseline)")
+        
+        # Report responses NOT in the largest cluster
         outliers = set()
-        for response in valid_responses:
-            # Compare this response to all others
-            ratios = []
-            for other in valid_responses:
-                if response.username != other.username:
-                    ratio = Levenshtein.ratio(response.body, other.body)
-                    ratios.append(ratio)
-            
-            if ratios:
-                avg_ratio = statistics.mean(ratios)
-                if avg_ratio < threshold:
-                    outliers.add(response.username)
-                    if self.verbose:
-                        print(f"      → {response.username}: Avg similarity {avg_ratio:.2%} (threshold: {threshold:.0%})")
+        for i, label in enumerate(labels):
+            if label != largest_cluster:
+                outliers.add(valid_responses[i].username)
+                cluster_desc = f"outlier" if label == -1 else f"cluster {label}"
+                if self.verbose:
+                    print(f"      → {valid_responses[i].username}: In {cluster_desc} (differs from baseline)")
         
         return outliers
     
