@@ -89,15 +89,21 @@ class AsyncRequester:
         # Replace placeholder in URL
         target_url = url.replace(placeholder, username)
             
-        # Replace placeholder in data
+        # Recursive function to replace placeholders in nested structures
+        def replace_in_nested(obj, placeholder, username):
+            if isinstance(obj, str):
+                return obj.replace(placeholder, username)
+            elif isinstance(obj, dict):
+                return {k: replace_in_nested(v, placeholder, username) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [replace_in_nested(item, placeholder, username) for item in obj]
+            else:
+                return obj
+        
+        # Replace placeholder in data (supports nested structures)
         request_data = None
         if data:
-            request_data = {}
-            for key, value in data.items():
-                if isinstance(value, str):
-                    request_data[key] = value.replace(placeholder, username)
-                else:
-                    request_data[key] = value
+            request_data = replace_in_nested(data, placeholder, username)
                         
         # Prepare headers with evasion
         request_headers = {}
